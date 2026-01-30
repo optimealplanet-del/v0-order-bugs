@@ -1,60 +1,72 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@/lib/supabase/server"
+import { NextResponse } from "next/server"
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+interface OrderProduct {
+  title: string
+  price: number
+  qty: number
+}
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+interface OrderRequest {
+  firstName: string
+  lastName: string
+  email: string
+  whatsapp: string
+  products: OrderProduct[]
+  totalAmount: number
+  paymentMethod: string
+  language?: string
+  couponCode?: string
+  discountAmount?: number
+}
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+export async function POST(request: Request) {
   try {
-    const { nom, prenom, email, phone, items, total } = req.body;
+    const orderData: OrderRequest = await request.json()
 
-    if (!nom || !prenom || !email || !phone || !items || !total) {
-      return res.status(400).json({ error: 'Champs manquants' });
+    const supabase = await createClient()
+
+    // Préparer les items en JSON
+    const itemsArray = orderData.products.map(p => ({
+      title: p.title,
+      price: p.price,
+      qty: p.qty
+    }))
+
+    // Créer la commande avec les BONS noms de colonnes
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        nom: orderData.lastName,           // ✅ CORRECT
+        prenom: orderData.firstName,        // ✅ CORRECT
+        email: orderData.email,             // ✅ CORRECT
+        phone: orderData.whatsapp,          // ✅ CORRECT
+        items: itemsArray,                  // ✅ CORRECT (JSONB)
+        total: orderData.totalAmount,       // ✅ CORRECT
+        status: "pending",
+        paid: false
+      })
+      .select("id")
+      .single()
+
+    if (orderError) {
+      console.error("[Order Error]:", orderError)
+      return NextResponse.json(
+        { success: false, error: orderError.message },
+        { status: 500 }
+      )
     }
 
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
-      return res.status(500).json({ error: 'Erreur serveur' });
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    const { data, error } = await supabase
-      .from('orders')
-      .insert([
-        {
-          nom,
-          prenom,
-          email,
-          phone,
-          items: JSON.stringify(items),
-          total: parseFloat(total),
-          status: 'pending',
-          paid: false
-        }
-      ])
-      .select();
-
-    if (error) {
-      return res.status(500).json({ error: 'Erreur' });
-    }
-
-    return res.status(201).json({
-      success: true,
-      order_id: data[0].id
-    });
+    return NextResponse.json({ 
+      success: true, 
+      orderId: order.id 
+    })
 
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error("[Exception]:", err)
+    return NextResponse.json(
+      { success: false, error: "Erreur lors de la création de la commande" },
+      { status: 500 }
+    )
   }
 }
